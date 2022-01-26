@@ -113,7 +113,7 @@ class MTLArchitecture(nn.Module):
         for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches):
             # print(batch_num)
             optim.zero_grad()
-            NER_forward_result, RE_forward_result = self.forward(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
+            NER_forward_result, RE_forward_result = self.forward(X, Y, C, C_lengths.cpu(), rstartseqs, rendseqs, rseqs, sents)
             loss_NER, loss_RE = NER_forward_result["loss"], RE_forward_result["loss"]
             final_loss = loss_NER + self.RELossLambda * loss_RE
             final_loss.backward()
