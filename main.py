@@ -7,6 +7,8 @@ import copy
 import random
 import math
 from logger import Logger
+from torchinfo import summary
+
 
 def main(args):
     if args.dataset_name == "conll04":
@@ -21,7 +23,10 @@ def main(args):
 
     device = torch.device('cuda' if args.cuda else 'cpu')
 
-    data = Dataset(path, args.dataset_name, 2, device)
+
+    data = Dataset(path, args.dataset_name, 1024, device)
+
+    print(data)
 
     data.log(logger)
     logger.log(str(args))
@@ -31,7 +36,9 @@ def main(args):
                             args.num_layers_ner, args.num_layers_re, len(data.tag2y), \
                             len(data.relation2y), args.init, args.label_embeddings_size, \
                             args.re_f1_size, args.re_lambda, args.e1_activation_type, \
-                            args.r1_activation_type, args.recurrent_unit, device).to(device)
+                            args.r1_activation_type, args.recurrent_unit, device)
+
+    model.to("cuda")
 
     model.apply(get_init_weights(args.init))
     optim = torch.optim.Adam(model.parameters(), lr=args.lr)

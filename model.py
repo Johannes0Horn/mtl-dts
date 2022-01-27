@@ -7,6 +7,8 @@ import math
 import itertools
 from collections import defaultdict, Counter
 import numpy as np
+from torchinfo import summary
+
 
 class MTLArchitecture(nn.Module):
     """
@@ -111,9 +113,19 @@ class MTLArchitecture(nn.Module):
 
         output = {}
         for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches):
+
             # print(batch_num)
             optim.zero_grad()
-            NER_forward_result, RE_forward_result = self.forward(X, Y, C, C_lengths.cpu(), rstartseqs, rendseqs, rseqs, sents)
+            print(X.shape)
+            print(Y.shape)
+            print(C.shape)
+            print(C_lengths.shape)
+            print (len(rstartseqs))
+            print(len(rendseqs))
+            print(len(rseqs))
+            print(len(sents))
+
+            NER_forward_result, RE_forward_result = self.forward(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
             loss_NER, loss_RE = NER_forward_result["loss"], RE_forward_result["loss"]
             final_loss = loss_NER + self.RELossLambda * loss_RE
             final_loss.backward()
@@ -310,6 +322,7 @@ class SharedRNN(nn.Module):
         num_words, char_dim = char_embeddings.size()
         char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
         final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings, one_hot_embeddings], dim=2)
+        print(final_embeddings.shape)
 
         # Dropout pre BiRNN
         final_embeddings = self.dropout(final_embeddings)
@@ -646,7 +659,7 @@ class CharRNN(nn.Module):
         """
         B = len(char_lengths)
 
-        packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths,
+        packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths.to("cpu"),
                                       batch_first=True, enforce_sorted=False)
         _, (final_h, _) = self.birnn(packed)
         return final_h
