@@ -116,14 +116,14 @@ class MTLArchitecture(nn.Module):
 
             # print(batch_num)
             optim.zero_grad()
-            print(X.shape)
-            print(Y.shape)
-            print(C.shape)
-            print(C_lengths.shape)
-            print (len(rstartseqs))
-            print(len(rendseqs))
-            print(len(rseqs))
-            print(len(sents))
+            #print(X.shape)
+            #print(Y.shape)
+            #print(C.shape)
+            #print(C_lengths.shape)
+            #print (len(rstartseqs))
+            #print(len(rendseqs))
+            #print(len(rseqs))
+            #print(len(sents))
 
             NER_forward_result, RE_forward_result = self.forward(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
             loss_NER, loss_RE = NER_forward_result["loss"], RE_forward_result["loss"]
@@ -322,13 +322,21 @@ class SharedRNN(nn.Module):
         num_words, char_dim = char_embeddings.size()
         char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
         final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings, one_hot_embeddings], dim=2)
-        print(final_embeddings.shape)
+        #print("final embedding shape:")
+        #print(final_embeddings.shape)
+
+
+        
 
         # Dropout pre BiRNN
         final_embeddings = self.dropout(final_embeddings)
 
         # Get the shared layer representations.
         shared_output, _ = self.wordRNN(final_embeddings)
+
+        #print(summary(shared_output, input_data=final_embeddings))
+
+
         return shared_output
 
 

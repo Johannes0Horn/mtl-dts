@@ -24,7 +24,7 @@ def main(args):
     device = torch.device('cuda' if args.cuda else 'cpu')
 
 
-    data = Dataset(path, args.dataset_name, 1024, device)
+    data = Dataset(path, args.dataset_name, 2, device)
 
     print(data)
 
