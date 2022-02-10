@@ -1,14 +1,12 @@
 import argparse
 import torch
-from read_data import Dataset
+from read_data import REDataset, CLDataset
 from model import MTLArchitecture
 from utils import get_init_weights
 import copy
 import random
 import math
 from logger import Logger
-from torchinfo import summary
-
 
 def main(args):
     if args.dataset_name == "conll04":
@@ -23,22 +21,20 @@ def main(args):
 
     device = torch.device('cuda' if args.cuda else 'cpu')
 
+    re_data = REDataset(path, args.dataset_name, 2, device)
 
-    data = Dataset(path, args.dataset_name, 2, device)
+    cl_data = CLDataset(path, args.dataset_name, 2, device)
 
-    print(data)
 
-    data.log(logger)
+    re_data.log(logger)
     logger.log(str(args))
 
-    model = MTLArchitecture(len(data.word2x), args.shared_layer_size, len(data.char2c), args.char_dim, \
+    model = MTLArchitecture(len(re_data.word2x), args.shared_layer_size, len(re_data.char2c), args.char_dim, \
                             args.hidden_dim, args.dropout, args.re_dropout, args.num_layers_shared, \
-                            args.num_layers_ner, args.num_layers_re, len(data.tag2y), \
-                            len(data.relation2y), args.init, args.label_embeddings_size, \
+                            args.num_layers_ner, args.num_layers_re, len(re_data.tag2y), \
+                            len(re_data.relation2y), args.init, args.label_embeddings_size, \
                             args.re_f1_size, args.re_lambda, args.e1_activation_type, \
-                            args.r1_activation_type, args.recurrent_unit, device)
-
-    model.to("cuda")
+                            args.r1_activation_type, args.recurrent_unit, device).to(device)
 
     model.apply(get_init_weights(args.init))
     optim = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -48,14 +44,16 @@ def main(args):
 
     try:
         for ep in range(1, args.epochs + 1):
-            random.shuffle(data.batches_train)
-            output = model.do_epoch(ep, data.batches_train, args.clip, optim, logger=logger, check_interval=args.check_interval)
+            random.shuffle(re_data.batches_train)
+            random.shuffle(cl_data.batches_train)
+
+            output = model.do_epoch(ep, cl_data.batches_train, re_data.batches_train, args.clip, optim, logger=logger, check_interval=args.check_interval)
 
             if math.isnan(output['loss']):
                 break
 
             with torch.no_grad():
-                    eval_result = model.evaluate(data.batches_test, logger=logger, tag2y=data.tag2y, rel2y=data.relation2y)
+                    eval_result = model.evaluate(re_data.batches_test, logger=logger, tag2y=re_data.tag2y, rel2y=re_data.relation2y)
                     print(eval_result)
                 
             # perf = eval_result['f1_<all>'] + eval_result['re_f1']

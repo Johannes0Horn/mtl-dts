@@ -7,8 +7,6 @@ import math
 import itertools
 from collections import defaultdict, Counter
 import numpy as np
-from torchinfo import summary
-
 
 class MTLArchitecture(nn.Module):
     """
@@ -46,18 +44,59 @@ class MTLArchitecture(nn.Module):
         self.shared_layers = SharedRNN(num_word_types, shared_layer_size, num_char_types,
                                        char_dim, hidden_dim, dropout, num_layers_shared,
                                        recurrent_unit, device)
-
+        self.cl_layers = CLSpecificRNN(shared_layer_size, 1, hidden_dim, dropout,
+                                    num_layers_ner, init, label_embeddings_size,
+                                    e1_activation_type, recurrent_unit)
         self.ner_layers = NERSpecificRNN(shared_layer_size, num_tag_types, hidden_dim, dropout,
                                          num_layers_ner, init, label_embeddings_size,
                                          e1_activation_type, recurrent_unit)
-
         self.re_layers = RESpecificRNN(shared_layer_size, num_rel_types, hidden_dim, dropout, re_dropout,
                                        num_layers_re, label_embeddings_size, re_ff1_size,
                                        r1_activation_type, recurrent_unit, device)
 
         self.loss = nn.CrossEntropyLoss()
 
-    def score(self, X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents):
+    def scoreCL(self, X, Y, C, C_lengths, sents):
+        """
+        Evaluation through all the shared, NER and RE RNNs.
+
+        :param X: encoded sentences
+        :param Y: encoded tags
+        :param C: encoded characters
+        :param C_lengths: lengths of characters in the words
+        :param rstartseqs: the start indices of the relations for RE
+        :param rendseqs: the end indices of relations for RE
+        :param rseqs:
+        :param sents: raw non-encoded sentences
+        :return:
+        """
+
+        shared_representations = self.shared_layers(C, C_lengths, sents)
+        cl_preds, cl_embeddings = self.cl_layers.scorer(shared_representations, Y)
+        return cl_preds
+
+
+    def forwardCL(self, X, Y, C, C_lengths, sents):
+        """
+        Do a single forwawrd pass on the entire CL architecture - through all the shared and CL RNNs.
+
+        :param X: encoded sentences
+        :param Y: encoded tags
+        :param C: encoded characters
+        :param C_lengths: lengths of characters in the words
+        :param rstartseqs: the start indices of the relations for RE
+        :param rendseqs: the end indices of relations for RE
+        :param rseqs:
+        :param sents: raw non-encoded sentences
+        :return:
+        """
+
+        shared_representations = self.shared_layers(C, C_lengths, sents)
+        cl_score, cl_embeddings = self.cl_layers(shared_representations, Y)
+        return cl_score
+
+
+    def scoreRE(self, X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents):
         """
         Evaluation through all the shared, NER and RE RNNs.
 
@@ -77,7 +116,7 @@ class MTLArchitecture(nn.Module):
         re_scores = self.re_layers.scorer(shared_representations, ner_tag_embeddings, rstartseqs, rendseqs, rseqs)
         return ner_preds, re_scores
 
-    def forward(self, X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents):
+    def forwardRE(self, X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents):
         """
         Do a single forwawrd pass on the entire architecture - through all the shared, NER and RE RNNs.
 
@@ -97,7 +136,8 @@ class MTLArchitecture(nn.Module):
         re_score = self.re_layers(shared_representations, ner_tag_embeddings, rstartseqs, rendseqs, rseqs)
         return ner_score, re_score
 
-    def do_epoch(self, epoch_num, train_batches, clip, optim, logger=None, check_interval=200):
+    def do_epoch(self, epoch_num, cl_train_batches, re_train_batches, clip, optim, logger=None, check_interval=200):
+
         """
         Run the forward pass in multiple epochs across training batches.
 
@@ -112,20 +152,10 @@ class MTLArchitecture(nn.Module):
         print("\nTraining...")
 
         output = {}
-        for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches):
-
+        for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(re_train_batches):
             # print(batch_num)
             optim.zero_grad()
-            #print(X.shape)
-            #print(Y.shape)
-            #print(C.shape)
-            #print(C_lengths.shape)
-            #print (len(rstartseqs))
-            #print(len(rendseqs))
-            #print(len(rseqs))
-            #print(len(sents))
-
-            NER_forward_result, RE_forward_result = self.forward(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
+            NER_forward_result, RE_forward_result = self.forwardRE(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
             loss_NER, loss_RE = NER_forward_result["loss"], RE_forward_result["loss"]
             final_loss = loss_NER + self.RELossLambda * loss_RE
             final_loss.backward()
@@ -133,20 +163,34 @@ class MTLArchitecture(nn.Module):
             nn.utils.clip_grad_norm_(self.parameters(), clip)
             optim.step()
 
-            output["loss"] = NER_forward_result['loss'] + RE_forward_result['loss'] if not 'loss' in output else \
-                                output["loss"] + (NER_forward_result['loss'] + RE_forward_result['loss'])
+            
             output["ner_loss"] = NER_forward_result['loss'] if not 'ner_loss' in output else \
                                 output["ner_loss"] + NER_forward_result['loss']
             output["re_loss"] = RE_forward_result['loss'] if not 're_loss' in output else \
                                 output["re_loss"] + RE_forward_result['loss']
+            #CL Branch
+            cl_X, cl_Y, cl_C, cl_C_lengths, cl_sents = cl_train_batches[batch_num]
+            optim.zero_grad()
+            CL_forward_result = self.forwardCL(cl_X, cl_Y, cl_C, cl_C_lengths, cl_sents)
+            loss_CL = CL_forward_result["loss"]
+            final_loss = loss_CL
+            final_loss.backward()
+
+            output["cl_loss"] = CL_forward_result['loss'] if not 'cl_loss' in output else \
+                                output["cl_loss"] + CL_forward_result['loss']
+
+
+            output["loss"] = CL_forward_result['loss'] + NER_forward_result['loss'] + RE_forward_result['loss'] if not 'loss' in output else \
+                                output["loss"] + (CL_forward_result['loss'] + NER_forward_result['loss'] + RE_forward_result['loss'])
 
 
             if logger and (batch_num + 1) % check_interval == 0:
                 logger.log('Epoch {:3d} | Batch {:5d}/{:5d} | '
                            'Average Loss {:8.4f} | '
+                           'Average CL Loss {:8.4f} | '
                            'Average NER Loss {:8.4f} | '
-                           'Average RE Loss {:8.4f} \n'.format(epoch_num, batch_num + 1, len(train_batches), 
-                            output['loss'] / (batch_num + 1), output['ner_loss'] / (batch_num + 1), 
+                           'Average RE Loss {:8.4f} \n'.format(epoch_num, batch_num + 1, len(re_train_batches), 
+                            output['loss'] / (batch_num + 1), output['cl_loss'] / (batch_num + 1), output['ner_loss'] / (batch_num + 1), 
                             output['re_loss'] / (batch_num + 1)))
 
             if math.isnan(output['loss']):
@@ -179,7 +223,7 @@ class MTLArchitecture(nn.Module):
         for (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in eval_batches:
             try:
                 B, T = Y.size()
-                ner_preds, re_scores = self.score(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)  # B x T x L
+                ner_preds, re_scores = self.scoreRE(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)  # B x T x L
 
                 num_preds += B * T
                 num_correct += (ner_preds == Y).sum().item()
@@ -322,23 +366,95 @@ class SharedRNN(nn.Module):
         num_words, char_dim = char_embeddings.size()
         char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
         final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings, one_hot_embeddings], dim=2)
-        #print("final embedding shape:")
-        #print(final_embeddings.shape)
-
-
-        
 
         # Dropout pre BiRNN
         final_embeddings = self.dropout(final_embeddings)
 
         # Get the shared layer representations.
         shared_output, _ = self.wordRNN(final_embeddings)
-
-        #print(summary(shared_output, input_data=final_embeddings))
-
-
         return shared_output
 
+
+class CLSpecificRNN(nn.Module):
+    """
+    CL specific bidirectional GRU layers that take in the shared representations from the shared layers and calculates
+    the respective CL scores.
+    """
+
+    def __init__(self, shared_layer_size, num_outputs, hidden_dim, dropout, num_layers, \
+                 init, label_embeddings_size, activation_type="relu", recurrent_unit="gru"):
+        """        print(batched[0])
+        s
+        Initialise.
+
+        :param shared_layer_size: final output size of the shared layers, to be as inputs to task-specific layers
+        :param num_cl_types: unique tags of the model, will be used by CL specific layers
+        :param hidden_dim: the CL biRNN hidden layer dimension
+        :param dropout: dropout values for nodes in biRNN
+        :param num_layers: number of layers in this biRNN
+        :label_embeddings_size: label embedding size
+        :param activation_type: the type of activation function to use
+        :param recurrent_unit: the type of recurrent unit to use for biRNN - GRU or LSTM
+        """
+
+        super(CLSpecificRNN, self).__init__()
+
+        self.Pad_ind = 0
+        self.cl_embeddings = nn.Embedding(2, label_embeddings_size, padding_idx=self.Pad_ind)
+        nn.init.xavier_uniform_(self.cl_embeddings.weight.data)
+
+        if recurrent_unit == "gru":
+            self.birnn = nn.GRU(2 * shared_layer_size, shared_layer_size, num_layers, bidirectional=True)
+        else:
+            self.birnn = nn.LSTM(2 * shared_layer_size, shared_layer_size, num_layers, bidirectional=True)
+
+        self.dropout = nn.Dropout(p=dropout)
+        self.FFNNe1 = nn.Linear(2 * shared_layer_size, hidden_dim)
+        if activation_type == "relu":
+            self.activation = nn.ReLU()
+        elif activation_type == "tanh":
+            self.activation = nn.Tanh()
+        elif activation_type == "gelu":
+            self.activation = nn.GELU()
+
+        self.FFNNe2 = nn.Linear(hidden_dim, num_outputs)
+
+        self.loss = nn.CrossEntropyLoss()
+
+        #self.loss = CRFLoss(num_tag_types, init)
+
+    def forward(self, shared_representations, Y):
+        """
+        Do a forward pass by taking input from the shared layers and generating the CL scores for the input
+        sentences.
+
+        :param shared_representations: tensor of shared representations from the shared layer.
+        :param Y: the label CL tags for the input sentences
+        :return: CL scores
+        """
+        # Dropout before biRNN
+        shared_representations = self.dropout(shared_representations)
+        cl_representation, _ = self.birnn(shared_representations)
+        scores = self.FFNNe2(self.activation(self.FFNNe1(cl_representation)))
+        loss = self.loss(scores, Y)
+        cl_embeddings = self.cl_embeddings(Y)
+        return {'loss': loss}, cl_embeddings
+
+    def scorer(self, shared_representations, Y):
+        """
+        Score the representation at evaluation time
+
+        :param shared_representations: tensor of shared representations from the shared layer.
+        :param Y: the label CL tags for the input sentences
+        :return: CL scores
+        """
+        cl_representation, _ = self.birnn(shared_representations)
+        scores = self.FFNNe2(self.activation(self.FFNNe1(cl_representation)))
+        _, preds = self.loss.decode(scores)  # B x T
+        cl_embeddings = self.cl_embeddings(preds)
+        print("Actual Predictions: ", Y)
+        print("CL Predictions: ", preds)
+        return preds, cl_embeddings
 
 class NERSpecificRNN(nn.Module):
     """
@@ -667,7 +783,7 @@ class CharRNN(nn.Module):
         """
         B = len(char_lengths)
 
-        packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths.to("cpu"),
+        packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths,
                                       batch_first=True, enforce_sorted=False)
         _, (final_h, _) = self.birnn(packed)
         return final_h

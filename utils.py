@@ -6,6 +6,7 @@ from torchtext.vocab import Vectors
 import os
 import torch
 import torch.nn as nn
+from random import shuffle
 
 
 conll_entities = set()
@@ -48,7 +49,57 @@ def get_boundaries(bio):
             boundaries.append((s, i - 1, entity))
 
     return boundaries
-    
+
+def load_labeled_data(neg_path, pos_path, sort_by_length=True):
+    """
+
+    :param path:
+    :param sort_by_length:
+    :return:
+    """
+    Ys = []
+    wordseqs = []
+    charseqslist = []
+    wordcounter = Counter()
+    charcounter = Counter()
+
+    neg_data = shuffle(json.load(open(neg_path)))
+    pos_data = shuffle(json.load(open(pos_path)))
+
+    neg_data = json.load(open(neg_path))
+    shuffle(neg_data)
+    pos_data = json.load(open(pos_path))
+    shuffle(pos_data)
+
+    min_number_of_samples = min(len(neg_data), len(pos_data))
+
+    neg_data = neg_data[:min_number_of_samples]
+    pos_data = pos_data[:min_number_of_samples]
+    data = (neg_data + pos_data)
+    shuffle(data)
+
+
+    for datapoint in data:
+        wordseqs.append(datapoint["tokens"])
+        charseqslist.append([char for words in datapoint["tokens"]
+                            for char in words])
+        Ys.append(0 if "ADE" in datapoint and datapoint["ADE"] == False else 1)
+
+    for sent, charslist in zip(wordseqs, charseqslist):
+        for word in sent:
+            wordcounter[word] += 1
+
+        for char in charslist:
+            charcounter[char] += 1
+
+    if sort_by_length:
+        wordseqs, charseqslist = (list(t) for t in zip(*sorted(zip(wordseqs, charseqslist),
+                                                                  key=lambda x: len(x[0]), reverse=True)))
+    assert len(wordseqs) == len(
+        data), "Make sure the data is loading properly and is not lost"
+
+    return Ys, wordseqs, charseqslist, wordcounter, charcounter    
+
 def load_vertical_tagged_data(path, sort_by_length=True):
     """
 
