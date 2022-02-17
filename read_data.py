@@ -166,6 +166,7 @@ class CLDataset():
         return imap
 
     def log(self, logger):
+        logger.log('CL Dataset')
         logger.log('-'*79)
         train_lengths = [len(xseq) for xseq in self.wordseqs_train]
         logger.log('Num train seqs: %d' % len(self.wordseqs_train))

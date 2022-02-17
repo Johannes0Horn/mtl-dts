@@ -153,7 +153,7 @@ class MTLArchitecture(nn.Module):
 
         output = {}
         for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(re_train_batches):
-            # print(batch_num)
+            print(batch_num)
             optim.zero_grad()
             NER_forward_result, RE_forward_result = self.forwardRE(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
             loss_NER, loss_RE = NER_forward_result["loss"], RE_forward_result["loss"]
@@ -783,7 +783,7 @@ class CharRNN(nn.Module):
         """
         B = len(char_lengths)
 
-        packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths,
+        packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths.cpu(),
                                       batch_first=True, enforce_sorted=False)
         _, (final_h, _) = self.birnn(packed)
         return final_h
